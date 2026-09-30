@@ -1,0 +1,71 @@
+name: Windows build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14.7'
+          architecture: x64
+      - name: Install pinned build dependencies
+        run: python -m pip install -r requirements-build.txt
+      - name: Test and build portable release
+        run: python -B tools/build_release.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-release
+          path: |
+            dist/*.zip
+            dist/ticket_bot.pyw
+            dist/SHA256SUMS.txt
+            dist/MD5SUMS.txt
+          if-no-files-found: error
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: windows-2025
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Download the tested build and publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          TAG: ${{ github.ref_name }}
+        shell: pwsh
+        run: |
+          gh run download $env:RUN_ID --name windows-release --dir release
+          if ($LASTEXITCODE -ne 0) { throw 'Artifact download failed' }
+          $notes = @'
+          Download the Windows ZIP, extract the entire folder, and run E621TicketBot.exe. Python, Tk and Pillow are bundled. Keep _internal beside the EXE.
+
+          Alternatively, inspect and run ticket_bot.pyw with Python, Tk and Pillow. Application data stays in data/ beside the program; no personal data is included in this release.
+
+          SHA256SUMS.txt verifies the ZIP, source and extracted executable. MD5SUMS.txt is supplied for compatibility only. Matching hashes confirm file integrity, not source-to-binary equivalence. This release was built from the tagged source in the public GitHub Actions workflow.
+          '@
+          $notes | Set-Content -LiteralPath release-notes.txt
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG release/* --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+            gh release edit $env:TAG --notes-file release-notes.txt
+          } else {
+            gh release create $env:TAG release/* --verify-tag --title "Wisp's e621 Mod Ticket Bot $env:TAG" --notes-file release-notes.txt
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Release publishing failed' }

@@ -1,0 +1,13 @@
+/data/
+/config.json
+/state*.json
+/E621TicketAlert-3s-chime.wav
+/.build/
+/.venv/
+/dist/
+__pycache__/
+*.pyc
+*.log
+*.tmp
+/tests/_output/
+/tests/native_launch_graphics.json
